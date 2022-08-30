@@ -1,5 +1,30 @@
 <template>
   <div class="container mx-auto flex flex-col items-center bg-gray-100 p-4">
+    <div
+      v-if="loading"
+      class="fixed w-100 h-100 opacity-80 bg-purple-800 inset-0 z-50 flex items-center justify-center"
+    >
+      <svg
+        class="animate-spin -ml-1 mr-3 h-12 w-12 text-white"
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+      >
+        <circle
+          class="opacity-25"
+          cx="12"
+          cy="12"
+          r="10"
+          stroke="currentColor"
+          stroke-width="4"
+        ></circle>
+        <path
+          class="opacity-75"
+          fill="currentColor"
+          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+        ></path>
+      </svg>
+    </div>
     <div class="container">
       <div class="w-full my-4"></div>
       <section>
@@ -18,6 +43,23 @@
                 class="block w-full pr-10 border-gray-300 text-gray-900 focus:outline-none focus:ring-gray-500 focus:border-gray-500 sm:text-sm rounded-md"
                 placeholder="Например DOGE"
               />
+            </div>
+            <template v-if="suggestions.length">
+              <div
+                class="flex bg-white shadow-md p-1 rounded-md shadow-md flex-wrap"
+              >
+                <span
+                  v-for="s in suggestions"
+                  v-bind:key="s.Symbol"
+                  v-on:click="(ticker = s.Symbol), add(s.Symbol)"
+                  class="inline-flex items-center px-2 m-1 rounded-md text-xs font-medium bg-gray-300 text-gray-800 cursor-pointer"
+                >
+                  {{ s.Symbol }}
+                </span>
+              </div>
+            </template>
+            <div v-if="error" class="text-sm text-red-600">
+              Такой тикер уже добавлен
             </div>
           </div>
         </div>
@@ -139,34 +181,81 @@ export default {
       ticker: null,
       tickers: [],
       selected: null,
-      graph: []
+      graph: [],
+      loading: true,
+      error: null,
+      coinList: [],
+      suggestions: []
     };
   },
 
+  async created() {
+    const tickersData = localStorage.getItem("cryptonomicon-list");
+
+    if (tickersData) {
+      this.tickers = JSON.parse(tickersData);
+      this.tickers.forEach((ticker) => this.subscribeToUpdates(ticker.name));
+    }
+
+    const response = await fetch(
+      "https://min-api.cryptocompare.com/data/all/coinlist?summary=true"
+    );
+    const data = await response.json();
+    this.coinList = Object.values(data.Data);
+  },
+
+  mounted() {
+    setTimeout(() => {
+      this.loading = false;
+    }, 1000);
+  },
+
   methods: {
-    add() {
-      const currentTicker = { name: this.ticker, price: "-" };
-      this.tickers.push(currentTicker);
+    subscribeToUpdates(tickerName) {
       setInterval(async () => {
         const f = await fetch(
-          `https://min-api.cryptocompare.com/data/price?fsym=${currentTicker.name}&tsyms=USD&api_key=90f2bce33b93ac9974ba21b80f9f3bbe374777964741e664d542d2d13fd29e7f`
+          `https://min-api.cryptocompare.com/data/price?fsym=${tickerName}&tsyms=USD&api_key=90f2bce33b93ac9974ba21b80f9f3bbe374777964741e664d542d2d13fd29e7f`
         );
         const data = await f.json();
 
-        this.tickers.find((t) => t.name === currentTicker.name).price =
+        this.tickers.find((t) => t.name === tickerName).price =
           data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
 
-        if (this.selected?.name === currentTicker.name) {
+        if (this.selected?.name === tickerName) {
           this.graph.push(data.USD);
-          console.log(this.graph);
         }
       }, 5000);
       this.ticker = "";
+    },
+    add() {
+      const currentTicker = {
+        name: this.ticker,
+        price: "-"
+      };
+      currentTicker.name = currentTicker.name.toUpperCase();
+
+      if (
+        this.tickers.some((t) => t.name.toUpperCase() === currentTicker.name)
+      ) {
+        this.error = true;
+        return;
+      }
+
+      this.tickers.push(currentTicker);
+      localStorage.setItem("cryptonomicon-list", JSON.stringify(this.tickers));
+      this.subscribeToUpdates(currentTicker.name);
     },
 
     select(ticker) {
       this.selected = ticker;
       this.graph = [];
+    },
+
+    suggest() {
+      this.suggestions = this.coinList
+        .filter((value) => value.Symbol.startsWith(this.ticker.toUpperCase()))
+        .slice(0, 4);
+      console.log(this.suggestions);
     },
 
     handleDelete(tickerToRemove) {
@@ -179,6 +268,13 @@ export default {
       return this.graph.map(
         (price) => 5 + ((price - minValue) * 95) / (maxValue - minValue)
       );
+    }
+  },
+
+  watch: {
+    ticker() {
+      this.error = null;
+      this.suggest();
     }
   }
 };
